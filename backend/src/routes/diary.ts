@@ -1,52 +1,28 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
-import { upsertUser, createSession, addMessage, getMessages, updateSessionEnd } from '../services/supabase';
 import { transcribeAudio } from '../services/whisper';
 import { generateReflection, analyzeEmotion } from '../services/claude';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// POST /api/diary/start
-router.post('/start', async (req: Request, res: Response) => {
-  try {
-    const { deviceId } = req.body;
-    if (!deviceId) return res.status(400).json({ error: 'deviceId is required' });
-
-    const userId = await upsertUser(deviceId);
-    const sessionId = await createSession(userId);
-
-    const aiMessage = 'こんばんは。今日はどんな一日でしたか？';
-    await addMessage(sessionId, 'assistant', aiMessage);
-
-    res.json({ sessionId, aiMessage });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // POST /api/diary/respond
+// stateless: クライアントが会話履歴を毎回送る
 router.post('/respond', upload.single('audio'), async (req: Request, res: Response) => {
   try {
-    const { sessionId } = req.body;
+    const { history } = req.body;
     const file = req.file;
-    if (!sessionId || !file) return res.status(400).json({ error: 'sessionId and audio are required' });
+    if (!file) return res.status(400).json({ error: 'audio is required' });
 
     const transcript = await transcribeAudio(file.buffer, file.mimetype);
-    await addMessage(sessionId, 'user', transcript);
 
-    const messages = await getMessages(sessionId);
-    const history = messages.slice(0, -1); // 今追加したuserメッセージを除く
+    const parsedHistory: Array<{ role: 'user' | 'assistant'; content: string }> =
+      history ? JSON.parse(history) : [];
 
-    const aiMessage = await generateReflection(
-      history.map((m) => ({ role: m.role, content: m.content })),
-      transcript
-    );
-    await addMessage(sessionId, 'assistant', aiMessage);
+    const aiMessage = await generateReflection(parsedHistory, transcript);
 
-    const assistantMessages = messages.filter((m) => m.role === 'assistant');
-    const isEnding = assistantMessages.length >= 3 && aiMessage.includes('ゆっくり休んでね');
+    const allAssistantCount = parsedHistory.filter((m) => m.role === 'assistant').length;
+    const isEnding = allAssistantCount >= 2 && aiMessage.includes('ゆっくり休んでね');
 
     res.json({ transcript, aiMessage, isEnding });
   } catch (err) {
@@ -55,27 +31,15 @@ router.post('/respond', upload.single('audio'), async (req: Request, res: Respon
   }
 });
 
-// POST /api/diary/end
-router.post('/end', async (req: Request, res: Response) => {
+// POST /api/diary/analyze
+// セッション終了時に感情分析のみ行う
+router.post('/analyze', async (req: Request, res: Response) => {
   try {
-    const { sessionId } = req.body;
-    if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
-
-    const messages = await getMessages(sessionId);
-    const transcript = messages
-      .filter((m) => m.role === 'user')
-      .map((m) => m.content)
-      .join('\n');
+    const { transcript } = req.body;
+    if (!transcript) return res.status(400).json({ error: 'transcript is required' });
 
     const emotion = await analyzeEmotion(transcript);
-    await updateSessionEnd(sessionId, { ...emotion, transcript });
-
-    res.json({
-      emotionLabel: emotion.label,
-      emotionScore: emotion.score,
-      emotionValence: emotion.valence,
-      summary: emotion.summary,
-    });
+    res.json(emotion);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
