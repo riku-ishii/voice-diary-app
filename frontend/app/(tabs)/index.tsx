@@ -7,6 +7,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { loadEntries } from '../../services/storage';
 
 const DEVICE_ID_KEY = '@voice_diary_device_id';
+const ONBOARDING_KEY = '@onboarding_completed';
 
 function generateDeviceId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -19,6 +20,12 @@ export default function HomeScreen() {
 
   useEffect(() => {
     (async () => {
+      const onboarded = await AsyncStorage.getItem(ONBOARDING_KEY);
+      if (!onboarded) {
+        router.replace('/onboarding');
+        return;
+      }
+
       let id = await AsyncStorage.getItem(DEVICE_ID_KEY);
       if (!id) {
         id = generateDeviceId();
