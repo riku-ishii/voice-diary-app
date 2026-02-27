@@ -24,15 +24,16 @@ export default function RecordingScreen() {
 
   useEffect(() => {
     reset();
-    Audio.requestPermissionsAsync().then((result) => {
+    addMessage({ role: 'assistant', content: INITIAL_AI_MESSAGE });
+    (async () => {
+      const result = await Audio.requestPermissionsAsync();
       if (result.granted) {
-        Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+        speak(INITIAL_AI_MESSAGE);
       } else {
         setPermissionDenied(true);
       }
-    });
-    addMessage({ role: 'assistant', content: INITIAL_AI_MESSAGE });
-    speak(INITIAL_AI_MESSAGE);
+    })();
   }, []);
 
   useEffect(() => {
@@ -72,6 +73,7 @@ export default function RecordingScreen() {
         setIsRecording(false);
         setLoading(true);
         await recordingRef.current?.stopAndUnloadAsync();
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
         const uri = recordingRef.current?.getURI();
         recordingRef.current = null;
         if (!uri) return;
@@ -98,6 +100,7 @@ export default function RecordingScreen() {
     } else {
       try {
         Speech.stop(); // 録音開始時に読み上げを停止
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
         const { recording } = await Audio.Recording.createAsync(
           Audio.RecordingOptionsPresets.HIGH_QUALITY
         );
